@@ -1,5 +1,5 @@
 #===============================================================================
-# PURPOSE: DEG Analysis
+# PURPOSE: DEG Analysis on Sex Differences
 # Circadian Data
 #===============================================================================
 
@@ -24,18 +24,18 @@ setwd("/Users/judyabuel/Desktop/Xist/circadian_atlas")
 # Load count matrix
 counts <- read.delim("GSE297702_circadian_atlas_rawcounts.txt", row.names = 1)
 
-# Load metadata
+# Load metadata - this contains sex and timepoints
 metadata <- read.csv("wt_circadian_traits.csv")
 metadata$Sex <- factor(metadata$Sex)
 metadata$Timepoint <- factor(metadata$Timepoint)
 
-# Relevel to set Male and ZT0 as references
+# Re-level to set Male and ZT0 as references
 metadata$Sex <- relevel(metadata$Sex, ref = "Male")
 metadata$Timepoint <- relevel(metadata$Timepoint, ref = "0")
 metadata$Timepoint <- factor(as.character(metadata$Timepoint))  # Ensure proper factor levels
 
 #===============================================================================
-# Preprocessing
+# Pre-processing
 #===============================================================================
 
 # Create DGEList object and normalize
@@ -56,6 +56,20 @@ fit <- lmFit(v, design)
 fit <- eBayes(fit)
 
 
+# Get the voom-transformed counts (log2-CPM with weights)
+voom_log2_CPM <- v$E  # E contains the normalized expression values
+
+logCPM <- cpm(dge, log = TRUE)  # Simple log2-CPM (no voom weights)
+write.csv(logCPM, "log2_CPM_unfiltered.csv")  # Not in your current code
+
+# Save raw CPM (unfiltered)
+write.csv(cpm(dge, log = FALSE), "raw_CPM_unfiltered.csv")
+
+# Save filtered CPM
+write.csv(cpm(dge, log = FALSE), "filtered_CPM.csv")
+
+# Save voom log2-CPM
+write.csv(v$E, "voom_log2_CPM.csv")
 
 #===============================================================================
 # Define Contrasts
@@ -93,96 +107,133 @@ gene_map <- getBM(
 )
 
 #===============================================================================
-# Generate Volcano Plots for Each Timepoint
+#               Generate Volcano Plots for Each Timepoint
 #===============================================================================
 
 # Create output directories
-output_dir <- "New_volcano_plots"
-results_dir <- "deg_results"
+output_dir <- "volcano_plots"
+results_dir <- "volcano_deg_results"
 dir.create(output_dir, showWarnings = FALSE)
 dir.create(results_dir, showWarnings = FALSE)
 
-# Load required libraries
-library(ggplot2)
-library(dplyr)
-library(ggrepel)
+# Initialize an empty list to store all DEG results
+all_deg_results <- list()
 
+#Load required libraries
+#library(ggplot2)
+#library(dplyr)
+#library(ggrepel)
 
-# Loop over all contrasts
+# 7. Process all contrasts
 for (contrast_name in colnames(contrast.matrix)) {
-  message("Processing ", contrast_name, "...")
-  
-  # Get DEG results
-  top_table <- topTable(fit2, coef = contrast_name, number = Inf, sort.by = "P")
-  top_table$ensembl_gene_id <- sub("\\..*", "", rownames(top_table))
-  top_table_annotated <- merge(top_table, gene_map, by = "ensembl_gene_id", all.x = TRUE)
-  
-  # Add fallback label
-  top_table_annotated$label <- ifelse(
-    is.na(top_table_annotated$mgi_symbol) | top_table_annotated$mgi_symbol == "",
-    top_table_annotated$ensembl_gene_id,
-    top_table_annotated$mgi_symbol
-  )
-  
-  # Classify expression status
-  top_table_annotated$Expression <- case_when(
-    top_table_annotated$adj.P.Val < 0.05 & top_table_annotated$logFC > 1  ~ "Upregulated",
-    top_table_annotated$adj.P.Val < 0.05 & top_table_annotated$logFC < -1 ~ "Downregulated",
-    TRUE ~ "Not Significant"
-  )
-  
-  # Save full DEG results
-  write.csv(
-    top_table_annotated,
-    file = file.path(results_dir, paste0(contrast_name, "_DEG_results.csv")),
-    row.names = FALSE
-  )
-  
-  # Label ALL significant up/downregulated genes
-  label_df <- top_table_annotated %>%
-    filter(adj.P.Val < 0.05 & (logFC > 1 | logFC < -1)) %>%
-    arrange(adj.P.Val) %>%
-    head(30)
-  
-  
-  # Plot
-  p <- ggplot(top_table_annotated, aes(x = logFC, y = -log10(adj.P.Val), color = Expression)) +
-    geom_point(alpha = 0.8, size = 1.5) +
-    scale_color_manual(values = c(
-      "Upregulated" = "red",
-      "Downregulated" = "blue",
-      "Not Significant" = "grey"
-    )) +
-    geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
-    geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-    labs(
-      title = paste("Volcano Plot:", contrast_name),
-      x = "Log2 Fold Change",
-      y = expression(-log[10](adjusted~P~value)),
-      color = "Expression"
-    ) +
-    theme_minimal(base_size = 14) +
-    geom_text_repel(
-      data = label_df,
-      aes(label = label),
-      size = 3,
-      max.overlaps = 100,
-      box.padding = 0.4,
-      point.padding = 0.3,
-      segment.color = "black"
+  tryCatch({
+    message("\nProcessing ", contrast_name, "...")
+    
+    # Get DEG results
+    top_table <- topTable(fit2, coef = contrast_name, number = Inf, sort.by = "P")
+    top_table$ensembl_gene_id <- sub("\\..*", "", rownames(top_table))
+    
+    # Merge with gene annotations
+    top_table_annotated <- merge(top_table, gene_map, by = "ensembl_gene_id", all.x = TRUE)
+    
+    # Create labels
+    top_table_annotated$label <- ifelse(
+      is.na(top_table_annotated$mgi_symbol) | top_table_annotated$mgi_symbol == "",
+      top_table_annotated$ensembl_gene_id,
+      top_table_annotated$mgi_symbol
     )
-  
-  # Save plot
-  png(file.path(output_dir, paste0(contrast_name, "_volcano.png")), width = 2000, height = 1800, res = 300)
-  print(p)
-  dev.off()
+    
+    # Classify expression
+    top_table_annotated$Expression <- case_when(
+      top_table_annotated$adj.P.Val < 0.05 & top_table_annotated$logFC > 1  ~ "Upregulated",
+      top_table_annotated$adj.P.Val < 0.05 & top_table_annotated$logFC < -1 ~ "Downregulated",
+      TRUE ~ "Not Significant"
+    )
+    
+    # Add contrast identifier
+    top_table_annotated$Contrast <- contrast_name
+    
+    # Store in combined list
+    all_deg_results[[contrast_name]] <- top_table_annotated
+    
+    # Save individual contrast results (optional)
+    write.csv(
+      top_table_annotated,
+      file = file.path(results_dir, paste0(contrast_name, "_DEG_results.csv")),
+      row.names = FALSE
+    )
+    
+    # Generate volcano plot
+    label_df <- top_table_annotated %>%
+      filter(adj.P.Val < 0.05 & (logFC > 1 | logFC < -1)) %>%
+      arrange(adj.P.Val) %>%
+      head(30)
+    
+    p <- ggplot(top_table_annotated, aes(x = logFC, y = -log10(adj.P.Val), color = Expression)) +
+      geom_point(alpha = 0.8, size = 1.5) +
+      scale_color_manual(values = c(
+        "Upregulated" = "red",
+        "Downregulated" = "blue",
+        "Not Significant" = "grey"
+      )) +
+      geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+      labs(
+        title = paste("Volcano Plot:", contrast_name),
+        x = "Log2 Fold Change",
+        y = "-Log10 Adjusted P-value",
+        color = "Expression"
+      ) +
+      theme_minimal(base_size = 14) +
+      geom_text_repel(
+        data = label_df,
+        aes(label = label),
+        size = 3,
+        max.overlaps = 100,
+        box.padding = 0.4,
+        point.padding = 0.3
+      )
+    
+    ggsave(
+      filename = file.path(output_dir, paste0(contrast_name, "_volcano.pdf")),
+      plot = p,
+      device = "pdf",
+      width = 10,
+      height = 8
+    )
+    
+    message("Successfully processed ", contrast_name)
+    
+  }, error = function(e) {
+    message("ERROR in ", contrast_name, ": ", e$message)
+  })
 }
+
+# 8. Combine and save all DEG results
+combined_deg <- bind_rows(all_deg_results)
+# Base R column reordering
+combined_deg <- combined_deg[, c("Contrast", setdiff(names(combined_deg), "Contrast"))]
+# Base R significance column
+combined_deg$Significance <- ifelse(
+  combined_deg$adj.P.Val < 0.05 & combined_deg$logFC > 1, "Up",
+  ifelse(
+    combined_deg$adj.P.Val < 0.05 & combined_deg$logFC < -1, "Down",
+    "NS"
+  )
+)
+
+write.csv(
+  combined_deg,
+  file = file.path(results_dir, "ALL_DEG_results_combined.csv"),
+  row.names = FALSE
+)
+
 
 
 
 
 #===============================================================================
-# Generate Heatmap for Each Timepoint
+#                     Generate Heatmap across all Timepoint
 #===============================================================================
 
 library(pheatmap)
@@ -264,93 +315,6 @@ dev.off()
 
 
 #===============================================================================
-## HEATMAP: Top 15 DE Genes per Timepoint with Sex-specific Significance
-#===============================================================================
-
-library(pheatmap)
-library(dplyr)
-library(RColorBrewer)
-library(tibble)
-
-# Load DEG CSV and gene_map
-deg_all <- read.csv("DEG_Female_vs_Male_by_Timepoint.csv")
-deg_all <- deg_all %>%
-  mutate(ensembl_gene_id = sub(".*\\.", "", X))  # Extract Ensembl ID
-
-# Join with gene_map to add gene symbols
-deg_annot <- left_join(deg_all, gene_map, by = "ensembl_gene_id")
-
-# Use gene symbol for labels; fall back to Ensembl ID if missing
-deg_annot <- deg_annot %>%
-  mutate(label = ifelse(is.na(mgi_symbol) | mgi_symbol == "", ensembl_gene_id, mgi_symbol))
-
-# Get top 10 DEGs per timepoint (adj.P.Val < 0.05)
-deg_top <- deg_annot %>%
-  filter(adj.P.Val < 0.05) %>%
-  group_by(Timepoint) %>%
-  arrange(adj.P.Val, .by_group = TRUE) %>%
-  slice_head(n = 10) %>%
-  ungroup()
-
-# Get unique top genes
-top_genes <- unique(deg_top$ensembl_gene_id)
-
-# Subset voom-normalized expression matrix
-expr_top <- v$E[rownames(v$E) %in% top_genes, ]
-
-# Match rownames to gene symbols
-gene_labels <- deg_top %>%
-  dplyr::select(ensembl_gene_id, label) %>%
-  distinct()
-rownames(expr_top) <- gene_labels$label[match(rownames(expr_top), gene_labels$ensembl_gene_id)]
-
-# Optional: scale per gene (z-score)
-expr_scaled <- t(scale(t(expr_top)))
-
-# Column annotation using metadata
-annot_col <- metadata %>%
-  dplyr::select(Sample_ID, Sex, Timepoint) %>%
-  filter(Sample_ID %in% colnames(expr_scaled)) %>%
-  tibble::column_to_rownames("Sample_ID")
-
-# Update colnames to "Timepoint_SampleID" for cleaner display
-colnames(expr_scaled) <- paste0(annot_col[colnames(expr_scaled), "Timepoint"], "_", colnames(expr_scaled))
-
-# Define colors for annotation
-ann_colors <- list(
-  Sex = c(Female = "firebrick", Male = "steelblue"),
-  Timepoint = setNames(RColorBrewer::brewer.pal(length(unique(annot_col$Timepoint)), "Set3"),
-                       unique(annot_col$Timepoint))
-)
-
-# Match updated colnames back to annot_col
-annot_col <- annot_col[colnames(expr_scaled), , drop = FALSE]
-rownames(annot_col) <- colnames(expr_scaled)  # match to expr_scaled
-
-# Create output directory
-output_dir <- "Heatmap"
-dir.create(output_dir, showWarnings = FALSE)
-
-# Save heatmap
-png(file.path(output_dir, "Heatmap_Top10_DEGs_AllTimepoints.png"), width = 1600, height = 1200, res = 300)
-
-pheatmap(
-  expr_scaled,
-  cluster_rows = TRUE,
-  cluster_cols = TRUE,
-  annotation_col = annot_col,
-  annotation_colors = ann_colors,
-  color = colorRampPalette(c("navy", "white", "firebrick"))(100),
-  fontsize_row = 9,
-  fontsize_col = 6,
-  angle_col = 45,
-  main = "Top DEGs per Timepoint: Female vs Male"
-)
-
-dev.off()
-
-
-#===============================================================================
 #              Line graph of the Top 10 genes across timepoints
 #===============================================================================
 
@@ -383,7 +347,7 @@ plot_genes_paginated <- function(data, ncol = 3, nrow = 2, per_page = ncol * nro
       geom_point(size = 2) +
       ggforce::facet_wrap_paginate(~ Gene, ncol = ncol, nrow = nrow, page = i) +
       scale_y_continuous(limits = c(-10, 15), breaks = seq(-10, 15, by = 5)) +
-      labs(title = paste("Changes in Gene Expression per Timepoint", i), x = "Timepoint", y = "log2 Fold Change") +
+      labs(title = paste("Changes in Gene Expression per Timepoint"), x = "Timepoint", y = "log2 Fold Change") +
       theme_minimal() +
       theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
             plot.title = element_text(hjust = 0.5, face = "bold"),
@@ -402,6 +366,7 @@ plot_genes_paginated <- function(data, ncol = 3, nrow = 2, per_page = ncol * nro
 
 # Run the function (adjust nrow/ncol as needed)
 plot_genes_paginated(data_long, ncol = 3, nrow = 2)  # 6 genes per page (3 columns x 2 rows)
+
 
 
 #===============================================================================
@@ -447,76 +412,6 @@ upset_plot <- upset(
 
 # Save to PNG
 ggsave("UpSet_DEGs_Top15_Basic.png", plot = upset_plot, width = 10, height = 6, dpi = 300)
-
-
-
-
-
-
-#===============================================================================
-#                           Generate GO Analysis
-#===============================================================================
-
-# Load required packages
-library(clusterProfiler)
-library(org.Mm.eg.db) # For mouse genes (change if different organism)
-library(enrichplot)
-library(ggplot2)
-library(dplyr)
-
-# 1. Prepare significant genes from your DEG data
-sig_genes <- deg_annot %>%
-  filter(adj.P.Val < 0.05 & abs(logFC) > 1) %>% # Adjust thresholds as needed
-  pull(ensembl_gene_id) %>%
-  unique()
-
-# 2. Convert ENSEMBL IDs to ENTREZID
-gene_list <- bitr(sig_genes, 
-                  fromType = "ENSEMBL",
-                  toType = "ENTREZID",
-                  OrgDb = org.Mm.eg.db)
-
-# 3. Perform KEGG enrichment
-kegg_enrich <- enrichKEGG(
-  gene = gene_list$ENTREZID,
-  organism = "mmu", # "mmu" for mouse, "hsa" for human
-  pvalueCutoff = 0.05,
-  pAdjustMethod = "BH",
-  qvalueCutoff = 0.2
-)
-
-# Simplify redundant terms
-kegg_enrich <- clusterProfiler::simplify(kegg_enrich)
-
-# 4. Visualize results (multiple options - choose your preferred one)
-
-# Option A: Dot plot
-dot_plot <- dotplot(kegg_enrich, showCategory = 20) +
-  ggtitle("KEGG Pathway Enrichment") +
-  theme(axis.text.y = element_text(size = 8))
-
-# Option B: Bar plot
-bar_plot <- barplot(kegg_enrich, showCategory = 15) +
-  ggtitle("KEGG Pathway Enrichment") +
-  xlab("Gene Count") +
-  theme(axis.text.y = element_text(size = 8))
-
-# Option C: Enrichment Map
-enrich_map <- emapplot(pairwise_termsim(kegg_enrich), showCategory = 20)
-
-# Option D: Pathway-specific visualization (example)
-# First check available pathways:
-View(kegg_enrich@result)
-# Then visualize specific pathway (example with mmu05200 - Cancer pathways)
-# browseKEGG(kegg_enrich, "mmu05200") # Uncomment to view in browser
-
-# 5. Save plots
-ggsave("KEGG_dotplot.png", plot = dot_plot, width = 10, height = 8, dpi = 300)
-ggsave("KEGG_barplot.png", plot = bar_plot, width = 10, height = 8, dpi = 300)
-ggsave("KEGG_enrichmap.png", plot = enrich_map, width = 12, height = 10, dpi = 300)
-
-# Show one of the plots
-print(dot_plot)
 
 
 
