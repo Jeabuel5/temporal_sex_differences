@@ -54,10 +54,11 @@ colnames(design) <- make.names(colnames(design))  # Clean column names
 v <- voom(dge, design, plot = TRUE)
 fit <- lmFit(v, design)
 fit <- eBayes(fit)
-
+topTable(fit) # Contains logFC and adj.P.Val
 
 # Get the voom-transformed counts (log2-CPM with weights)
 voom_log2_CPM <- v$E  # E contains the normalized expression values
+write.csv(v$E, "voom_log2_CPM.csv") # Save voom log2-CPM
 
 logCPM <- cpm(dge, log = TRUE)  # Simple log2-CPM (no voom weights)
 write.csv(logCPM, "log2_CPM_unfiltered.csv")  # Not in your current code
@@ -68,8 +69,7 @@ write.csv(cpm(dge, log = FALSE), "raw_CPM_unfiltered.csv")
 # Save filtered CPM
 write.csv(cpm(dge, log = FALSE), "filtered_CPM.csv")
 
-# Save voom log2-CPM
-write.csv(v$E, "voom_log2_CPM.csv")
+
 
 #===============================================================================
 # Define Contrasts
@@ -124,7 +124,7 @@ all_deg_results <- list()
 #library(dplyr)
 #library(ggrepel)
 
-# 7. Process all contrasts
+# 7. Process all contrasts | Using voom_log2_CPM dataset = topTable that contains logFC and adj.P.Val
 for (contrast_name in colnames(contrast.matrix)) {
   tryCatch({
     message("\nProcessing ", contrast_name, "...")
@@ -211,8 +211,10 @@ for (contrast_name in colnames(contrast.matrix)) {
 
 # 8. Combine and save all DEG results
 combined_deg <- bind_rows(all_deg_results)
+
 # Base R column reordering
 combined_deg <- combined_deg[, c("Contrast", setdiff(names(combined_deg), "Contrast"))]
+
 # Base R significance column
 combined_deg$Significance <- ifelse(
   combined_deg$adj.P.Val < 0.05 & combined_deg$logFC > 1, "Up",
