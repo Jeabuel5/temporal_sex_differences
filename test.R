@@ -10,8 +10,8 @@ library(dplyr)
 library(tidyverse)
 library(biomaRt)
 library(ggplot2)
-library(EnhancedVolcano)
 library(ggrepel)
+library(EnhancedVolcano)
 library(tibble)
 
 # Set working directory
@@ -92,19 +92,38 @@ fit2 <- eBayes(fit2)
 #===============================================================================
 # Annotate Genes with MGI Symbols
 #===============================================================================
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Install mouse annotation database
+BiocManager::install("org.Mm.eg.db")
+
+# Load and use the package
+library(org.Mm.eg.db)
+
+# Get all Ensembl IDs and gene symbols
+# Just acknowledge the warning but keep all mappings
+annotations <- select(org.Mm.eg.db,
+                      keys = keys(org.Mm.eg.db),
+                      columns = c("ENSEMBL", "SYMBOL", "GENENAME"))
+
+# Result will contain multiple rows for some ENSEMBL IDs
+head(annotations)
 
 # Get clean Ensembl IDs from DGE object
 ensembl_ids <- rownames(dge)
 ensembl_ids_clean <- sub("\\..*", "", ensembl_ids)
 
 # Connect to Ensembl
-ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+ensembl <- useEnsembl(biomart = "ensembl", dataset = "mmusculus_gene_ensembl", mirror = "useast")
 gene_map <- getBM(
   attributes = c("ensembl_gene_id", "mgi_symbol"),
   filters = "ensembl_gene_id",
   values = ensembl_ids_clean,
   mart = ensembl
 )
+
+}
 
 #===============================================================================
 #               Generate Volcano Plots for Each Timepoint
