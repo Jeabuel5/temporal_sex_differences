@@ -46,9 +46,13 @@ dge <- calcNormFactors(dge, method = "TMM")
 keep <- rowSums(cpm(dge) >= 1) >= 3
 dge <- dge[keep, , keep.lib.sizes = FALSE]
 
-# Create design matrix
+# Purpose: To create a design matrix for statistical modeling.
+# Sex and Timepoint are variables from metadata.
+# * symbol means main effects + interaction term
+# To test whether effect of Sex depends on Timepoint (or vice versa)
 design <- model.matrix(~ Sex * Timepoint, data = metadata)
 colnames(design) <- make.names(colnames(design))  # Clean column names
+
 
 # Apply voom transformation and fit model
 v <- voom(dge, design, plot = TRUE)
@@ -57,11 +61,11 @@ fit <- eBayes(fit)
 topTable(fit) # Contains logFC and adj.P.Val
 
 # Get the voom-transformed counts (log2-CPM with weights)
-voom_log2_CPM <- v$E  # E contains the normalized expression values
-write.csv(v$E, "voom_log2_CPM.csv") # Save voom log2-CPM
+voom_log2_CPM <- v$E  # v$E contains extracts the log2-CPM values after voom transformation
+write.csv(v$E, "voom_log2_CPM.csv")
 
 logCPM <- cpm(dge, log = TRUE)  # Simple log2-CPM (no voom weights)
-write.csv(logCPM, "log2_CPM_unfiltered.csv")  # Not in your current code
+write.csv(logCPM, "log2_CPM_unfiltered.csv")
 
 # Save raw CPM (unfiltered)
 write.csv(cpm(dge, log = FALSE), "raw_CPM_unfiltered.csv")
@@ -72,13 +76,14 @@ write.csv(cpm(dge, log = FALSE), "filtered_CPM.csv")
 
 
 #===============================================================================
-# Define Contrasts
+#       Define Contrasts: Female vs. Male across all timepoints
 #===============================================================================
 
 contrast.matrix <- makeContrasts(
-  Female_vs_Male_T3  = SexFemale + SexFemale.Timepoint3,
-  Female_vs_Male_T6  = SexFemale + SexFemale.Timepoint6,
-  Female_vs_Male_T9  = SexFemale + SexFemale.Timepoint9,
+  Female_vs_Male_T0 = SexFemale,
+  Female_vs_Male_T3 = SexFemale + SexFemale.Timepoint3,
+  Female_vs_Male_T6 = SexFemale + SexFemale.Timepoint6,
+  Female_vs_Male_T9 = SexFemale + SexFemale.Timepoint9,
   Female_vs_Male_T12 = SexFemale + SexFemale.Timepoint12,
   Female_vs_Male_T15 = SexFemale + SexFemale.Timepoint15,
   Female_vs_Male_T18 = SexFemale + SexFemale.Timepoint18,
@@ -90,8 +95,9 @@ fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 
 #===============================================================================
-# Annotate Genes with MGI Symbols
+#                     Annotate Genes with MGI Symbols
 #===============================================================================
+
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 
@@ -122,132 +128,135 @@ gene_map <- getBM(
   values = ensembl_ids_clean,
   mart = ensembl
 )
-
 }
 
 #===============================================================================
 #               Generate Volcano Plots for Each Timepoint
 #===============================================================================
 
-# Create output directories
-output_dir <- "volcano_plots"
-results_dir <- "volcano_deg_results"
-dir.create(output_dir, showWarnings = FALSE)
-dir.create(results_dir, showWarnings = FALSE)
+# Create output directories with consistent naming
+dir.create("volcano_plots(1)", showWarnings = FALSE)
+dir.create("deg_results(1)", showWarnings = FALSE)
 
-# Initialize an empty list to store all DEG results
+# Initialize list to store all DEG results
 all_deg_results <- list()
 
-#Load required libraries
-#library(ggplot2)
-#library(dplyr)
-#library(ggrepel)
+# Define color scheme
+deg_colors <- c("Upregulated" = "#E41A1C",  # Red
+                "Downregulated" = "#377EB8", # Blue
+                "Not Significant" = "grey80") # Light grey
 
-# 7. Process all contrasts | Using voom_log2_CPM dataset = topTable that contains logFC and adj.P.Val
+# Process all contrasts
 for (contrast_name in colnames(contrast.matrix)) {
   tryCatch({
     message("\nProcessing ", contrast_name, "...")
     
-    # Get DEG results
-    top_table <- topTable(fit2, coef = contrast_name, number = Inf, sort.by = "P")
+    # Get DEG results with robust settings
+    top_table <- topTable(fit2, coef = contrast_name, number = Inf, 
+                          sort.by = "p", adjust.method = "BH")
+    
+    # Skip if no results
+    if (nrow(top_table) == 0) {
+      warning("No DEGs found for contrast: ", contrast_name)
+      next
+    }
+    
+    # Extract and annotate genes
     top_table$ensembl_gene_id <- sub("\\..*", "", rownames(top_table))
+    top_table_annotated <- merge(top_table, gene_map, 
+                                 by = "ensembl_gene_id", 
+                                 all.x = TRUE) %>%
+      tibble::as_tibble()
     
-    # Merge with gene annotations
-    top_table_annotated <- merge(top_table, gene_map, by = "ensembl_gene_id", all.x = TRUE)
-    
-    # Create labels
-    top_table_annotated$label <- ifelse(
-      is.na(top_table_annotated$mgi_symbol) | top_table_annotated$mgi_symbol == "",
-      top_table_annotated$ensembl_gene_id,
-      top_table_annotated$mgi_symbol
-    )
-    
-    # Classify expression
-    top_table_annotated$Expression <- case_when(
-      top_table_annotated$adj.P.Val < 0.05 & top_table_annotated$logFC > 1  ~ "Upregulated",
-      top_table_annotated$adj.P.Val < 0.05 & top_table_annotated$logFC < -1 ~ "Downregulated",
-      TRUE ~ "Not Significant"
-    )
-    
-    # Add contrast identifier
-    top_table_annotated$Contrast <- contrast_name
-    
-    # Store in combined list
-    all_deg_results[[contrast_name]] <- top_table_annotated
-    
-    # Save individual contrast results (optional)
-    write.csv(
-      top_table_annotated,
-      file = file.path(results_dir, paste0(contrast_name, "_DEG_results.csv")),
-      row.names = FALSE
-    )
-    
-    # Generate volcano plot
-    label_df <- top_table_annotated %>%
-      filter(adj.P.Val < 0.05 & (logFC > 1 | logFC < -1)) %>%
-      arrange(adj.P.Val) %>%
-      head(30)
-    
-    p <- ggplot(top_table_annotated, aes(x = logFC, y = -log10(adj.P.Val), color = Expression)) +
-      geom_point(alpha = 0.8, size = 1.5) +
-      scale_color_manual(values = c(
-        "Upregulated" = "red",
-        "Downregulated" = "blue",
-        "Not Significant" = "grey"
-      )) +
-      geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
-      geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-      labs(
-        title = paste("Volcano Plot:", contrast_name),
-        x = "Log2 Fold Change",
-        y = "-Log10 Adjusted P-value",
-        color = "Expression"
-      ) +
-      theme_minimal(base_size = 14) +
-      geom_text_repel(
-        data = label_df,
-        aes(label = label),
-        size = 3,
-        max.overlaps = 100,
-        box.padding = 0.4,
-        point.padding = 0.3
+    # Create labels - prioritize MGI symbol
+    top_table_annotated <- top_table_annotated %>%
+      dplyr::mutate(
+        label = dplyr::coalesce(mgi_symbol, ensembl_gene_id),
+        Timepoint = stringr::str_extract(contrast_name, "T\\d+$") %>% 
+          stringr::str_replace("T", "ZT"),
+        Expression = dplyr::case_when(
+          adj.P.Val < 0.05 & logFC > 1  ~ "Upregulated",
+          adj.P.Val < 0.05 & logFC < -1 ~ "Downregulated",
+          TRUE ~ "Not Significant"
+        ),
+        Significance = ifelse(adj.P.Val < 0.05, "FDR < 0.05", "Not Sig")
       )
     
-    ggsave(
-      filename = file.path(output_dir, paste0(contrast_name, "_volcano.pdf")),
-      plot = p,
-      device = "pdf",
-      width = 10,
-      height = 8
-    )
+    # Store results
+    all_deg_results[[contrast_name]] <- top_table_annotated
     
-    message("Successfully processed ", contrast_name)
+    # Get significant genes for labeling
+    sig_genes <- top_table_annotated %>%
+      dplyr::filter(adj.P.Val < 0.05 & abs(logFC) > 1) %>%
+      dplyr::arrange(adj.P.Val) %>%
+      dplyr::distinct(label, .keep_all = TRUE) %>%
+      dplyr::group_by(sign(logFC)) %>%  # Balance up/down regulated labels
+      dplyr::slice_head(n = 15)         # Top 15 per direction
+    
+    # Create volcano plot
+    volcano_plot <- ggplot(top_table_annotated, 
+                           aes(x = logFC, 
+                               y = -log10(adj.P.Val),
+                               color = Expression,
+                               alpha = Significance)) +
+      geom_point(size = 1.8) +
+      scale_color_manual(values = deg_colors) +
+      scale_alpha_manual(values = c("FDR < 0.05" = 0.8, "Not Sig" = 0.4)) +
+      geom_vline(xintercept = c(-1, 1), linetype = "dashed", linewidth = 0.3) +
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.3) +
+      labs(
+        title = paste("Female vs Male at", unique(top_table_annotated$Timepoint)),
+        subtitle = "Differentially Expressed Genes (logFC > 1, FDR < 0.05)",
+        x = expression(Log[2]~"Fold Change (Female/Male)"),
+        y = expression(-Log[10]~"Adjusted P-value"),
+        color = "Expression"
+      ) +
+      theme_minimal(base_size = 12) +
+      theme(
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)
+      ) +
+      geom_text_repel(
+        data = sig_genes,
+        aes(label = label),
+        size = 2.8,
+        max.overlaps = 30,
+        min.segment.length = 0.2,
+        box.padding = 0.4,
+        force = 1,
+        show.legend = FALSE
+      ) +
+      coord_cartesian(xlim = c(-max(abs(top_table_annotated$logFC))-0.5, 
+                               max(abs(top_table_annotated$logFC))+0.5))
+    
+    # Save plot in multiple formats
+    plot_name <- paste0("volcano_plots(1)/", make.names(contrast_name))
+    ggsave(paste0(plot_name, ".pdf"), volcano_plot, width = 9, height = 7)
+    ggsave(paste0(plot_name, ".png"), volcano_plot, width = 9, height = 7, dpi = 300)
+    
+    message("Saved plots for ", contrast_name)
     
   }, error = function(e) {
-    message("ERROR in ", contrast_name, ": ", e$message)
+    message("Error processing ", contrast_name, ": ", e$message)
   })
 }
 
-# 8. Combine and save all DEG results
-combined_deg <- bind_rows(all_deg_results)
+# Combine and save all results with better formatting
+combined_deg <- dplyr::bind_rows(all_deg_results) %>%
+  dplyr::select(Contrast = Timepoint,
+                Ensembl_ID = ensembl_gene_id,
+                Gene_Symbol = mgi_symbol,
+                LogFC = logFC,
+                PValue = P.Value,
+                FDR = adj.P.Val,
+                Expression = Expression,
+                AveExpr,
+                dplyr::everything()) %>%
+  dplyr::arrange(Contrast, FDR)
 
-# Base R column reordering
-combined_deg <- combined_deg[, c("Contrast", setdiff(names(combined_deg), "Contrast"))]
+readr::write_csv(combined_deg, "deg_results(1)/combined_DEG_results.csv")
 
-# Base R significance column
-combined_deg$Significance <- ifelse(
-  combined_deg$adj.P.Val < 0.05 & combined_deg$logFC > 1, "Up",
-  ifelse(
-    combined_deg$adj.P.Val < 0.05 & combined_deg$logFC < -1, "Down",
-    "NS"
-  )
-)
-
-write.csv(
-  combined_deg,
-  file = file.path(results_dir, "ALL_DEG_results_combined.csv"),
-  row.names = FALSE
-)
 
 
 
@@ -332,7 +341,6 @@ pheatmap(
 )
 
 dev.off()
-
 
 
 #===============================================================================
