@@ -98,7 +98,6 @@ if (!requireNamespace("WGCNA", quietly = TRUE)) {
 library(WGCNA)
 
 
-
 exprMale_t <- t(exprMale)
 exprFemale_t <- t(exprFemale)
 
@@ -164,6 +163,10 @@ plotDendroAndColors(
 )
 
 
+
+
+
+#===============================================================================
 # Assess module preservation
 multiExpr <- list(Male = list(data = exprMale_t),
                   Female = list(data = exprFemale_t))
