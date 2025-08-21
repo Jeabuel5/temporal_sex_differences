@@ -54,6 +54,12 @@ dge <- dge[keep, , keep.lib.sizes = FALSE]
 design <- model.matrix(~ Sex * Timepoint, data = metadata)
 colnames(design) <- make.names(colnames(design))  # Clean column names
 
+
+# Apply voom transformation and fit model
+v <- voom(dge, design, plot = TRUE)
+fit <- lmFit(v, design)
+
+
 # Define Contrasts: Female vs. Male across all timepoints
 contrast.matrix <- makeContrasts(
   Female_vs_Male_T0 = SexFemale,
@@ -67,10 +73,6 @@ contrast.matrix <- makeContrasts(
   levels = design
 )
 
-
-# Apply voom transformation and fit model
-v <- voom(dge, design, plot = TRUE)
-fit <- lmFit(v, design)
 fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 
