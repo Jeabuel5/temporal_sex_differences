@@ -666,11 +666,6 @@ ggplot(manders_long, aes(x = Pair, y = Coefficient, fill = SourceChannel)) +
   )
 
 
-
-
-
-
-
 #------------
 
 # Calculate Manders coefficients for "Snhg14 - Meg3"
@@ -901,14 +896,13 @@ p +
 
 
 
-#_______________________________________THIS WORKS!
+#--------------THIS WORKS, but it doesn't have statistical analysis---------------------
 # Example of your raw data
 data <- tibble(
   Channel = rep(c("Dapi_Area", "Meg3_Area", "Snhg14_Area", "Xist_Area"), each = 30),
   Label = rep(rep(c("WT", "11:11", "12:12"), each = 10), 4),
   Value = rnorm(120, mean = rep(c(80, 85, 99, 58, 63, 70, 50, 7, 7, 36, 14, 14), each = 10), sd = 5)
 )
-
 
 library(dplyr)
 install.packages("rstatix")
@@ -962,8 +956,8 @@ ggplot(data, aes(x = Label, y = Value, fill = Label)) +
 
 #------------------------------------------------------
 
-
-#This looks a better version of all the graphs I created
+#This looks a better version of all the graphs I created. 
+                   #This is the last version I created
 
 library(ggplot2)
 library(ggsignif)
@@ -1004,7 +998,6 @@ long_combined_data$Label <- recode(long_combined_data$Label,
                                    "11:11" = "HET/TG",
                                    "12:12" = "HET/WT"
 )
-
 
 
 p <- ggplot(summary_with_errors, aes(x = Label, y = Mean, fill = Label)) +
@@ -1048,69 +1041,8 @@ p <- ggplot(summary_with_errors, aes(x = Label, y = Mean, fill = Label)) +
     tip_length = 0.01
   )
 
-
-
-
-
 #----------------------------------------------------------------------------
 
-
-
-
-
-
-
-library(tidyverse)
-library(ggplot2)
-library(ggpubr) 
-
-
-# Create the combined plot with facets
-ggplot(long_summary, aes(x = Genotype, y = Area, fill = Genotype)) +
-  geom_bar(stat = "identity", position = position_dodge(), color = "black", alpha = 0.7) +
-  geom_point(data = individual_data, aes(x = Genotype, y = Area), 
-             color = "black", alpha = 0.5, 
-             position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.9), size = 2) + 
-  stat_compare_means(method = "anova", label = "p.signif", label.y = 35) +  # Use ANOVA for multiple comparisons
-  labs(title = "Cloud Size Comparison Across Genotypes",
-       x = "Genotype",
-       y = "Area (microns)") +
-  facet_wrap(~ Channel) + 
-  scale_x_discrete(labels = function(x) ifelse(x %in% c("WT", "Deletion", "Compensation"))) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-    axis.title.x = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold"),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.line = element_line(color = "black", linewidth = 0.3)
-  )
-
-
-library(ggplot2)
-library(ggpubr)
-
-# Create the combined plot with facets
-ggplot(long_summary, aes(x = Genotype, y = Area, fill = Genotype)) +
-  geom_bar(stat = "identity", position = position_dodge(), color = "black", alpha = 0.7) +
-  geom_point(data = individual_data, aes(x = Genotype, y = Area), 
-             color = "black", alpha = 0.5, 
-             position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.9), size = 2) +
-  labs(title = "Cloud Size Comparison Across Genotypes",
-       x = "Genotype",
-       y = "Area (microns)") +
-  facet_wrap(~ Channel) + 
-  scale_x_discrete(labels = function(x) ifelse(x %in% c("WT", "Deletion", "Compensation"))) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-    axis.title.x = element_text(face = "bold"),
-    axis.title.y = element_text(face = "bold"),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.line = element_line(color = "black", linewidth = 0.3)
-  )
 
 
 
